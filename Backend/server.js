@@ -6,10 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-mongoose.connect('mongodb://localhost:27017/trees', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
+mongoose.connect('mongodb://localhost:27017/tree-plantation');
 
 const TreeSchema = new mongoose.Schema({
   treeId: String,
