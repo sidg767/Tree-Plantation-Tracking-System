@@ -1,254 +1,316 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Route, Search, TreePine, Info, Play, RotateCcw, Weight } from 'lucide-react';
+import { Route, Search, TreePine, Info, Play, RotateCcw, Weight, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-/** Euclidean distance between two tree nodes */
-function dist(a, b) {
+function euclidean(a, b) {
   return Math.hypot(a.location.x - b.location.x, a.location.y - b.location.y);
 }
 
-/**
- * Build a WEIGHTED adjacency list: graph[id] = [{ id, weight }, ...]
- * Each node connects to its k nearest neighbours.
- * Weight = Euclidean distance (scaled ×100 and rounded for display).
- */
 function buildWeightedGraph(trees, k = 3) {
   const graph = {};
   trees.forEach(t => {
     graph[t.treeId] = trees
       .filter(o => o.treeId !== t.treeId)
-      .map(o => ({ id: o.treeId, weight: dist(t, o) }))
+      .map(o => ({ id: o.treeId, weight: euclidean(t, o) }))
       .sort((a, b) => a.weight - b.weight)
       .slice(0, k);
   });
   return graph;
 }
 
-/**
- * Dijkstra's algorithm on a weighted adjacency list.
- * Returns { path: string[], totalCost: number } or { path: [], totalCost: 0 }.
- *
- * Uses a simple min-priority queue (sorted array).
- */
 function dijkstra(graph, start, end) {
   const INF = Infinity;
-  const dist  = {};  // best known cost to each node
-  const prev  = {};  // predecessor map for path reconstruction
-  const pq    = []; // [cost, nodeId]
-
-  // Initialise
-  Object.keys(graph).forEach(id => { dist[id] = INF; prev[id] = null; });
-  dist[start] = 0;
+  const d = {}, prev = {}, pq = [];
+  Object.keys(graph).forEach(id => { d[id] = INF; prev[id] = null; });
+  d[start] = 0;
   pq.push([0, start]);
-
   while (pq.length) {
-    // Pop minimum-cost entry
     pq.sort((a, b) => a[0] - b[0]);
     const [cost, u] = pq.shift();
-
     if (u === end) break;
-    if (cost > dist[u]) continue; // stale entry
-
+    if (cost > d[u]) continue;
     for (const { id: v, weight } of graph[u] || []) {
-      const newCost = dist[u] + weight;
-      if (newCost < dist[v]) {
-        dist[v] = newCost;
-        prev[v] = u;
-        pq.push([newCost, v]);
-      }
+      const nc = d[u] + weight;
+      if (nc < d[v]) { d[v] = nc; prev[v] = u; pq.push([nc, v]); }
     }
   }
-
-  if (dist[end] === INF) return { path: [], totalCost: 0 };
-
-  // Reconstruct path
+  if (d[end] === INF) return { path: [], totalCost: 0 };
   const path = [];
-  for (let cur = end; cur !== null; cur = prev[cur]) path.unshift(cur);
-  return { path, totalCost: dist[end] };
+  for (let c = end; c !== null; c = prev[c]) path.unshift(c);
+  return { path, totalCost: d[end] };
 }
 
-// ── coordinate projection ─────────────────────────────────────────────────────
-
-function projectNodes(trees, W, H, padding = 52) {
+function projectNodes(trees, W, H, padding = 60) {
   if (!trees.length) return {};
   const xs = trees.map(t => t.location.x);
   const ys = trees.map(t => t.location.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 1;
-  const rangeY = maxY - minY || 1;
-  const map = {};
+  const rX = maxX - minX || 1, rY = maxY - minY || 1;
+  const m = {};
   trees.forEach(t => {
-    map[t.treeId] = {
-      x: padding + ((t.location.x - minX) / rangeX) * (W - padding * 2),
-      y: padding + ((t.location.y - minY) / rangeY) * (H - padding * 2),
+    m[t.treeId] = {
+      x: padding + ((t.location.x - minX) / rX) * (W - padding * 2),
+      y: padding + ((t.location.y - minY) / rY) * (H - padding * 2),
     };
   });
-  return map;
+  return m;
 }
 
-// ── GraphCanvas ───────────────────────────────────────────────────────────────
+// ── GraphCanvas with zoom & pan ──────────────────────────────────────────────
+
+const CANVAS_W = 800;
+const CANVAS_H = 500;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 4;
 
 function GraphCanvas({ trees, graph, path, startId, endId }) {
-  const W = 700, H = 440;
-  const pos = projectNodes(trees, W, H);
+  const svgRef = useRef(null);
 
-  // Sets for fast lookup
-  const pathSet   = new Set(path);
+  // viewBox state for zoom/pan
+  const [vb, setVb] = useState({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ mx: 0, my: 0, vx: 0, vy: 0 });
+
+  const zoomLevel = CANVAS_W / vb.w; // >1 is zoomed in
+
+  const pos = projectNodes(trees, CANVAS_W, CANVAS_H);
+
+  const pathSet = new Set(path);
   const pathEdges = new Set();
   path.forEach((id, i) => {
     if (i < path.length - 1) {
       pathEdges.add(`${id}|${path[i + 1]}`);
-      pathEdges.add(`${path[i + 1]}|${id}`); // undirected
+      pathEdges.add(`${path[i + 1]}|${id}`);
     }
   });
 
-  const healthColor = {
-    Excellent: '#16a34a',
-    Good:      '#65a30d',
-    Average:   '#ca8a04',
-    Poor:      '#dc2626',
-  };
+  const healthColor = { Excellent: '#16a34a', Good: '#65a30d', Average: '#ca8a04', Poor: '#dc2626' };
 
   // Deduplicate edges
   const edges = [];
-  const seen  = new Set();
-  Object.entries(graph).forEach(([from, neighbors]) => {
-    neighbors.forEach(({ id: to, weight }) => {
+  const seen = new Set();
+  Object.entries(graph).forEach(([from, nbs]) => {
+    nbs.forEach(({ id: to, weight }) => {
       const key = [from, to].sort().join('|');
-      if (!seen.has(key)) {
-        seen.add(key);
-        edges.push({ from, to, weight, key });
-      }
+      if (!seen.has(key)) { seen.add(key); edges.push({ from, to, weight, key }); }
     });
   });
 
+  // ── Zoom ──
+  const applyZoom = useCallback((delta, cx, cy) => {
+    setVb(prev => {
+      const factor = delta > 0 ? 1.15 : 1 / 1.15;
+      const nw = Math.max(CANVAS_W / MAX_ZOOM, Math.min(CANVAS_W / MIN_ZOOM, prev.w * factor));
+      const nh = Math.max(CANVAS_H / MAX_ZOOM, Math.min(CANVAS_H / MIN_ZOOM, prev.h * factor));
+      // Zoom towards cursor
+      const rx = (cx - prev.x) / prev.w;
+      const ry = (cy - prev.y) / prev.h;
+      return {
+        w: nw, h: nh,
+        x: cx - rx * nw,
+        y: cy - ry * nh,
+      };
+    });
+  }, []);
+
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    // Convert mouse position to SVG coords
+    const mx = ((e.clientX - rect.left) / rect.width) * vb.w + vb.x;
+    const my = ((e.clientY - rect.top) / rect.height) * vb.h + vb.y;
+    applyZoom(e.deltaY, mx, my);
+  }, [vb, applyZoom]);
+
+  // Attach wheel listener with { passive: false }
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
+
+  // ── Pan ──
+  const onMouseDown = (e) => {
+    if (e.button !== 0) return;
+    setDragging(true);
+    dragStart.current = { mx: e.clientX, my: e.clientY, vx: vb.x, vy: vb.y };
+  };
+  const onMouseMove = (e) => {
+    if (!dragging) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const dx = ((e.clientX - dragStart.current.mx) / rect.width) * vb.w;
+    const dy = ((e.clientY - dragStart.current.my) / rect.height) * vb.h;
+    setVb(prev => ({ ...prev, x: dragStart.current.vx - dx, y: dragStart.current.vy - dy }));
+  };
+  const onMouseUp = () => setDragging(false);
+
+  // ── Zoom controls ──
+  const zoomIn  = () => applyZoom(1, vb.x + vb.w / 2, vb.y + vb.h / 2);
+  const zoomOut = () => applyZoom(-1, vb.x + vb.w / 2, vb.y + vb.h / 2);
+  const resetView = () => setVb({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H });
+
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      className="w-full rounded-2xl border border-white/20 bg-gradient-to-br from-green-950/80 to-slate-900/80 backdrop-blur-md shadow-2xl"
-      style={{ minHeight: 300 }}
-    >
-      {/* Subtle grid */}
-      {Array.from({ length: 8 }).map((_, r) =>
-        Array.from({ length: 14 }).map((_, c) => (
-          <circle key={`${r}-${c}`} cx={c * 52 + 20} cy={r * 56 + 20} r={1} fill="rgba(255,255,255,0.05)" />
-        ))
-      )}
+    <div className="relative rounded-2xl overflow-hidden border border-white/20 shadow-2xl">
+      {/* Zoom toolbar */}
+      <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
+        <button onClick={zoomIn}
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-black/50 hover:bg-black/70 text-white/80 hover:text-white backdrop-blur transition-all"
+          title="Zoom In"
+        ><ZoomIn size={15} /></button>
+        <button onClick={zoomOut}
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-black/50 hover:bg-black/70 text-white/80 hover:text-white backdrop-blur transition-all"
+          title="Zoom Out"
+        ><ZoomOut size={15} /></button>
+        <button onClick={resetView}
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-black/50 hover:bg-black/70 text-white/80 hover:text-white backdrop-blur transition-all"
+          title="Reset View"
+        ><Maximize2 size={14} /></button>
+      </div>
 
-      {/* ── Edges ── */}
-      {edges.map(({ from, to, weight, key }) => {
-        const isPath = pathEdges.has(`${from}|${to}`);
-        const p1 = pos[from], p2 = pos[to];
-        if (!p1 || !p2) return null;
+      {/* Zoom indicator */}
+      <div className="absolute top-3 left-3 z-10 text-[10px] font-bold text-white/50 bg-black/30 backdrop-blur px-2 py-1 rounded-md">
+        {Math.round(zoomLevel * 100)}%
+      </div>
 
-        const mx = (p1.x + p2.x) / 2;
-        const my = (p1.y + p2.y) / 2;
-        const label = (weight * 100).toFixed(1); // scale for readability
+      <svg
+        ref={svgRef}
+        viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
+        className="w-full bg-gradient-to-br from-green-950/90 to-slate-900/90"
+        style={{ minHeight: 380, cursor: dragging ? 'grabbing' : 'grab' }}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+      >
+        {/* ── Edges ── */}
+        {edges.map(({ from, to, weight, key }) => {
+          const isPath = pathEdges.has(`${from}|${to}`);
+          const p1 = pos[from], p2 = pos[to];
+          if (!p1 || !p2) return null;
+          const mx = (p1.x + p2.x) / 2;
+          const my = (p1.y + p2.y) / 2;
 
-        return (
-          <g key={key}>
-            <line
-              x1={p1.x} y1={p1.y}
-              x2={p2.x} y2={p2.y}
-              stroke={isPath ? '#4ade80' : 'rgba(255,255,255,0.13)'}
-              strokeWidth={isPath ? 3 : 1.5}
-              strokeDasharray={isPath ? '0' : '5 4'}
-              style={isPath ? { filter: 'drop-shadow(0 0 5px #4ade80)' } : {}}
-            />
+          return (
+            <g key={key}>
+              <line
+                x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                stroke={isPath ? '#4ade80' : 'rgba(255,255,255,0.08)'}
+                strokeWidth={isPath ? 2.5 : 1}
+                strokeDasharray={isPath ? '0' : '6 5'}
+                style={isPath ? { filter: 'drop-shadow(0 0 4px rgba(74,222,128,0.5))' } : {}}
+              />
+              {/* Only show weight label on path edges — keeps the graph clean */}
+              {isPath && (
+                <>
+                  <rect
+                    x={mx - 14} y={my - 8} width={28} height={15} rx={5}
+                    fill="rgba(0,0,0,0.55)" stroke="#4ade80" strokeWidth={0.7}
+                  />
+                  <text
+                    x={mx} y={my + 0.5}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize={7.5} fontWeight="700" fill="#4ade80"
+                  >
+                    {(weight * 100).toFixed(1)}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        })}
 
-            {/* Weight label bubble */}
-            <rect
-              x={mx - 13} y={my - 8}
-              width={26} height={14}
-              rx={4}
-              fill={isPath ? 'rgba(74,222,128,0.18)' : 'rgba(0,0,0,0.45)'}
-              stroke={isPath ? '#4ade80' : 'rgba(255,255,255,0.1)'}
-              strokeWidth={0.8}
-            />
-            <text
-              x={mx} y={my + 1}
-              textAnchor="middle" dominantBaseline="middle"
-              fontSize={7} fontWeight={isPath ? '700' : '500'}
-              fill={isPath ? '#4ade80' : 'rgba(255,255,255,0.45)'}
-            >
-              {label}
-            </text>
-          </g>
-        );
-      })}
+        {/* ── Nodes ── */}
+        {trees.map(t => {
+          const p = pos[t.treeId];
+          if (!p) return null;
+          const isStart = t.treeId === startId;
+          const isEnd   = t.treeId === endId;
+          const inPath  = pathSet.has(t.treeId);
+          const active  = isStart || isEnd || inPath;
 
-      {/* ── Nodes ── */}
-      {trees.map(t => {
-        const p = pos[t.treeId];
-        if (!p) return null;
-        const isStart = t.treeId === startId;
-        const isEnd   = t.treeId === endId;
-        const inPath  = pathSet.has(t.treeId);
-        const ring  = isStart ? '#22d3ee' : isEnd ? '#f472b6' : inPath ? '#4ade80' : 'rgba(255,255,255,0.2)';
-        const fill  = isStart ? '#0e7490' : isEnd ? '#9d174d' : inPath ? '#166534' : '#1e3a2f';
-        const glow  = isStart || isEnd || inPath;
+          const ring = isStart ? '#22d3ee' : isEnd ? '#f472b6' : inPath ? '#4ade80' : 'rgba(255,255,255,0.15)';
+          const fill = isStart ? '#0e7490' : isEnd ? '#9d174d' : inPath ? '#166534' : '#1a2e25';
 
-        return (
-          <g key={t.treeId} style={glow ? { filter: `drop-shadow(0 0 7px ${ring})` } : {}}>
-            {/* Outer pulse ring for start/end */}
-            {(isStart || isEnd) && (
-              <circle cx={p.x} cy={p.y} r={24} fill="none" stroke={ring} strokeWidth={1} opacity={0.4} />
-            )}
-            <circle cx={p.x} cy={p.y} r={18} fill={fill} stroke={ring} strokeWidth={2.5} />
+          return (
+            <g key={t.treeId} style={active ? { filter: `drop-shadow(0 0 6px ${ring})` } : {}}>
+              {/* Subtle outer ring for start/end */}
+              {(isStart || isEnd) && (
+                <circle cx={p.x} cy={p.y} r={24} fill="none" stroke={ring} strokeWidth={1} opacity={0.35}>
+                  <animate attributeName="r" values="22;26;22" dur="2s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.35;0.15;0.35" dur="2s" repeatCount="indefinite" />
+                </circle>
+              )}
 
-            {/* Health dot */}
-            <circle
-              cx={p.x + 12} cy={p.y - 12} r={5}
-              fill={healthColor[t.health] || '#888'}
-              stroke="#0f172a" strokeWidth={1.5}
-            />
+              <circle cx={p.x} cy={p.y} r={17} fill={fill} stroke={ring} strokeWidth={2} />
 
-            {/* Node ID */}
-            <text
-              x={p.x} y={p.y + 1}
-              textAnchor="middle" dominantBaseline="middle"
-              fontSize={8} fontWeight="800" fill="white"
-            >
-              {t.treeId}
-            </text>
+              {/* Health dot */}
+              <circle
+                cx={p.x + 11} cy={p.y - 11} r={4}
+                fill={healthColor[t.health] || '#888'}
+                stroke="#0f172a" strokeWidth={1.2}
+              />
 
-            {/* Species label */}
-            <text x={p.x} y={p.y + 31} textAnchor="middle" fontSize={7.5} fill="rgba(255,255,255,0.55)">
-              {t.species.length > 10 ? t.species.slice(0, 9) + '…' : t.species}
-            </text>
-          </g>
-        );
-      })}
+              {/* ID */}
+              <text
+                x={p.x} y={p.y + 0.5}
+                textAnchor="middle" dominantBaseline="middle"
+                fontSize={7.5} fontWeight="800" fill="white"
+              >
+                {t.treeId}
+              </text>
 
-      {/* ── Node legend ── */}
-      {[
-        { color: '#22d3ee', label: 'Start' },
-        { color: '#f472b6', label: 'End' },
-        { color: '#4ade80', label: 'Path' },
-        { color: 'rgba(255,255,255,0.25)', label: 'Other' },
-      ].map(({ color, label }, i) => (
-        <g key={label} transform={`translate(${14 + i * 76}, ${H - 18})`}>
-          <circle r={5} fill={color} />
-          <text x={9} y={1} dominantBaseline="middle" fontSize={9} fill="rgba(255,255,255,0.6)">{label}</text>
+              {/* Species (only show when zoomed in enough or on active nodes) */}
+              <text
+                x={p.x} y={p.y + 28}
+                textAnchor="middle" fontSize={7}
+                fill={active ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)'}
+              >
+                {t.species.length > 10 ? t.species.slice(0, 9) + '…' : t.species}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* ── Legend (fixed in viewBox bottom-left) ── */}
+        <g transform={`translate(${vb.x + 12}, ${vb.y + vb.h - 16})`}>
+          {[
+            { color: '#22d3ee', label: 'Start' },
+            { color: '#f472b6', label: 'End' },
+            { color: '#4ade80', label: 'Path' },
+            { color: 'rgba(255,255,255,0.25)', label: 'Other' },
+          ].map(({ color, label }, i) => (
+            <g key={label} transform={`translate(${i * 60}, 0)`}>
+              <circle r={4} fill={color} />
+              <text x={7} y={1} dominantBaseline="middle" fontSize={7} fill="rgba(255,255,255,0.55)">{label}</text>
+            </g>
+          ))}
+          {[
+            { color: '#16a34a', label: 'Excellent' },
+            { color: '#65a30d', label: 'Good' },
+            { color: '#ca8a04', label: 'Average' },
+            { color: '#dc2626', label: 'Poor' },
+          ].map(({ color, label }, i) => (
+            <g key={label} transform={`translate(${280 + i * 58}, 0)`}>
+              <circle r={3.5} fill={color} />
+              <text x={6} y={1} dominantBaseline="middle" fontSize={6.5} fill="rgba(255,255,255,0.45)">{label}</text>
+            </g>
+          ))}
         </g>
-      ))}
+      </svg>
 
-      {/* ── Health legend ── */}
-      {[
-        { color: '#16a34a', label: 'Excellent' },
-        { color: '#65a30d', label: 'Good' },
-        { color: '#ca8a04', label: 'Average' },
-        { color: '#dc2626', label: 'Poor' },
-      ].map(({ color, label }, i) => (
-        <g key={label} transform={`translate(${W - 252 + i * 64}, ${H - 18})`}>
-          <circle r={4} fill={color} />
-          <text x={7} y={1} dominantBaseline="middle" fontSize={8} fill="rgba(255,255,255,0.5)">{label}</text>
-        </g>
-      ))}
-    </svg>
+      {/* Hint */}
+      <div className="absolute bottom-3 right-3 z-10 text-[10px] text-white/30 font-medium">
+        Scroll to zoom · Drag to pan
+      </div>
+    </div>
   );
 }
 
@@ -280,27 +342,18 @@ export default function TraversalPage() {
     setError('');
     setTimeout(() => {
       const { path: result, totalCost: cost } = dijkstra(graph, startId, endId);
-      if (result.length) {
-        setPath(result);
-        setTotalCost(cost);
-      } else {
-        setError('No path found between these trees.');
-        setPath([]);
-        setTotalCost(0);
-      }
+      if (result.length) { setPath(result); setTotalCost(cost); }
+      else { setError('No path found between these trees.'); setPath([]); setTotalCost(0); }
       setLoading(false);
     }, 120);
   };
 
   const reset = () => { setPath([]); setStartId(''); setEndId(''); setError(''); setTotalCost(0); };
 
-  // Count unique edges
   const edgeCount = (() => {
-    const seen = new Set();
-    Object.entries(graph).forEach(([from, nbs]) =>
-      nbs.forEach(({ id: to }) => seen.add([from, to].sort().join('|')))
-    );
-    return seen.size;
+    const s = new Set();
+    Object.entries(graph).forEach(([f, nbs]) => nbs.forEach(({ id: t }) => s.add([f, t].sort().join('|'))));
+    return s.size;
   })();
 
   const healthBadge = {
@@ -310,7 +363,6 @@ export default function TraversalPage() {
     Poor:      'bg-red-100 text-red-700',
   };
 
-  // Get edge weight between two consecutive path nodes for display
   const edgeWeight = (fromId, toId) => {
     const nb = (graph[fromId] || []).find(n => n.id === toId);
     return nb ? (nb.weight * 100).toFixed(2) : '—';
@@ -326,16 +378,12 @@ export default function TraversalPage() {
         </div>
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight">Tree Traversal</h1>
-          <p className="text-green-200 text-sm">
-            Weighted graph · Dijkstra's shortest path algorithm
-          </p>
+          <p className="text-green-200 text-sm">Weighted graph · Dijkstra's shortest path algorithm</p>
         </div>
       </header>
 
       {/* Controls + Stats */}
       <div className="grid lg:grid-cols-4 gap-4 mb-6">
-
-        {/* Control panel */}
         <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-xl border border-white/20 lg:col-span-1">
           <h2 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
             <Search size={16} className="text-green-600" /> Find Shortest Path
@@ -368,18 +416,14 @@ export default function TraversalPage() {
               >
                 <Play size={14} /> {loading ? 'Running…' : 'Run Dijkstra'}
               </button>
-              <button
-                onClick={reset}
+              <button onClick={reset}
                 className="p-2.5 rounded-xl border-2 border-gray-100 hover:border-red-300 text-gray-400 hover:text-red-400 transition-all"
                 title="Reset"
-              >
-                <RotateCcw size={16} />
-              </button>
+              ><RotateCcw size={16} /></button>
             </div>
           </div>
         </div>
 
-        {/* Stat cards */}
         <div className="lg:col-span-3 grid sm:grid-cols-4 gap-4">
           <div className="bg-white/20 backdrop-blur rounded-2xl p-4 text-white flex flex-col justify-center">
             <p className="text-3xl font-extrabold">{trees.length}</p>
@@ -394,9 +438,7 @@ export default function TraversalPage() {
             <p className="text-green-200 text-sm font-medium">Hops</p>
           </div>
           <div className="bg-white/20 backdrop-blur rounded-2xl p-4 text-white flex flex-col justify-center">
-            <p className="text-3xl font-extrabold">
-              {totalCost ? (totalCost * 100).toFixed(2) : '—'}
-            </p>
+            <p className="text-3xl font-extrabold">{totalCost ? (totalCost * 100).toFixed(2) : '—'}</p>
             <p className="text-green-200 text-sm font-medium">Total Distance</p>
           </div>
         </div>
@@ -411,8 +453,7 @@ export default function TraversalPage() {
       {/* Graph */}
       <div className="mb-6">
         <div className="flex items-center gap-2 text-white/70 text-xs font-semibold uppercase tracking-widest mb-2 ml-1">
-          <Info size={13} />
-          Weighted graph · each edge label = distance × 100 · k=3 nearest neighbours
+          <Info size={13} /> Weighted graph · k=3 nearest neighbours · edge weights shown on path
         </div>
         {trees.length > 0
           ? <GraphCanvas trees={trees} graph={graph} path={path} startId={startId} endId={endId} />
@@ -438,12 +479,11 @@ export default function TraversalPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             {path.map((nodeId, index) => {
-              const tree     = trees.find(t => t.treeId === nodeId);
-              const isStart  = index === 0;
-              const isEnd    = index === path.length - 1;
-              const nextId   = path[index + 1];
-              const segCost  = nextId ? edgeWeight(nodeId, nextId) : null;
-
+              const tree    = trees.find(t => t.treeId === nodeId);
+              const isStart = index === 0;
+              const isEnd   = index === path.length - 1;
+              const nextId  = path[index + 1];
+              const segCost = nextId ? edgeWeight(nodeId, nextId) : null;
               return (
                 <React.Fragment key={nodeId}>
                   <div className={`flex flex-col items-center rounded-2xl px-4 py-3 shadow text-sm font-semibold ${
@@ -457,7 +497,6 @@ export default function TraversalPage() {
                       {tree?.health}
                     </span>
                   </div>
-
                   {segCost && (
                     <div className="flex flex-col items-center text-green-500">
                       <span className="text-[10px] font-bold bg-green-50 border border-green-200 text-green-700 px-1.5 py-0.5 rounded-md mb-0.5">
