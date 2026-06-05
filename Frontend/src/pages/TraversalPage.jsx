@@ -23,23 +23,27 @@ function buildWeightedGraph(trees, k = 3) {
 function dijkstra(graph, start, end) {
   const INF = Infinity;
   const d = {}, prev = {}, pq = [];
+  const visitOrder = [];      // nodes in the order Dijkstra settles them
+  const scannedEdges = [];    // edges explored: { from, to }
   Object.keys(graph).forEach(id => { d[id] = INF; prev[id] = null; });
   d[start] = 0;
   pq.push([0, start]);
   while (pq.length) {
     pq.sort((a, b) => a[0] - b[0]);
     const [cost, u] = pq.shift();
-    if (u === end) break;
     if (cost > d[u]) continue;
+    visitOrder.push(u);
+    if (u === end) break;
     for (const { id: v, weight } of graph[u] || []) {
+      scannedEdges.push({ from: u, to: v });
       const nc = d[u] + weight;
       if (nc < d[v]) { d[v] = nc; prev[v] = u; pq.push([nc, v]); }
     }
   }
-  if (d[end] === INF) return { path: [], totalCost: 0 };
+  if (d[end] === INF) return { path: [], totalCost: 0, visitOrder, scannedEdges };
   const path = [];
   for (let c = end; c !== null; c = prev[c]) path.unshift(c);
-  return { path, totalCost: d[end] };
+  return { path, totalCost: d[end], visitOrder, scannedEdges };
 }
 
 function projectNodes(trees, W, H, padding = 60) {
@@ -66,7 +70,7 @@ const CANVAS_H = 500;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 4;
 
-function GraphCanvas({ trees, graph, path, startId, endId }) {
+function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges, revealedPathEdges, animPhase, scanNodeDelay, scanEdgeDelay, pathEdgeDelay }) {
   const svgRef = useRef(null);
 
   // viewBox state for zoom/pan
@@ -78,14 +82,22 @@ function GraphCanvas({ trees, graph, path, startId, endId }) {
 
   const pos = projectNodes(trees, CANVAS_W, CANVAS_H);
 
-  const pathSet = new Set(path);
+  // Build sets for final path display (only after animation done)
+  const pathSet = animPhase === 'done' ? new Set(path) : new Set();
   const pathEdges = new Set();
-  path.forEach((id, i) => {
-    if (i < path.length - 1) {
-      pathEdges.add(`${id}|${path[i + 1]}`);
-      pathEdges.add(`${path[i + 1]}|${id}`);
-    }
-  });
+  if (animPhase === 'done') {
+    path.forEach((id, i) => {
+      if (i < path.length - 1) {
+        pathEdges.add(`${id}|${path[i + 1]}`);
+        pathEdges.add(`${path[i + 1]}|${id}`);
+      }
+    });
+  }
+
+  // Animation sets
+  const scanNodeSet = new Set(scanNodes || []);
+  const scanEdgeSet = new Set((scanEdges || []).map(e => [e.from, e.to].sort().join('|')));
+  const revealSet   = new Set((revealedPathEdges || []).map(e => `${e[0]}|${e[1]}`));
 
   const healthColor = { Excellent: '#16a34a', Good: '#65a30d', Average: '#ca8a04', Poor: '#dc2626' };
 
@@ -192,35 +204,41 @@ function GraphCanvas({ trees, graph, path, startId, endId }) {
       >
         {/* ── Edges ── */}
         {edges.map(({ from, to, weight, key }) => {
-          const isPath = pathEdges.has(`${from}|${to}`);
+          const sortedKey = [from, to].sort().join('|');
+          const isPath    = pathEdges.has(`${from}|${to}`);
+          const isScanned = scanEdgeSet.has(sortedKey);
+          const fwdKey    = `${from}|${to}`, revKey = `${to}|${from}`;
+          const isRevealed = revealSet.has(fwdKey) || revealSet.has(revKey);
+          const highlighted = isPath || isRevealed;
           const p1 = pos[from], p2 = pos[to];
           if (!p1 || !p2) return null;
           const mx = (p1.x + p2.x) / 2;
           const my = (p1.y + p2.y) / 2;
 
+          // CSS animation for smooth staggered appearance
+          const scanDelay = (scanEdgeDelay || {})[sortedKey];
+          const pathDelay = (pathEdgeDelay || {})[fwdKey] ?? (pathEdgeDelay || {})[revKey];
+          const animStyle = (isScanned && scanDelay != null)
+            ? { animation: `fadeGlowAmber 400ms ease-out ${scanDelay}ms both` }
+            : (isRevealed && pathDelay != null)
+            ? { animation: `fadeGlowGreen 500ms ease-out ${pathDelay}ms both` }
+            : {};
+
+          let stroke = 'rgba(255,255,255,0.08)', sw = 1, dash = '6 5';
+          if (highlighted || isPath) { stroke = '#4ade80'; sw = 2.5; dash = '0'; }
+          else if (isScanned)        { stroke = '#fbbf24'; sw = 1.5; dash = '0'; }
+
           return (
-            <g key={key}>
-              <line
-                x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                stroke={isPath ? '#4ade80' : 'rgba(255,255,255,0.08)'}
-                strokeWidth={isPath ? 2.5 : 1}
-                strokeDasharray={isPath ? '0' : '6 5'}
-                style={isPath ? { filter: 'drop-shadow(0 0 4px rgba(74,222,128,0.5))' } : {}}
+            <g key={key} style={animStyle}>
+              <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                stroke={stroke} strokeWidth={sw} strokeDasharray={dash}
               />
-              {/* Only show weight label on path edges — keeps the graph clean */}
-              {isPath && (
+              {highlighted && (
                 <>
-                  <rect
-                    x={mx - 14} y={my - 8} width={28} height={15} rx={5}
-                    fill="rgba(0,0,0,0.55)" stroke="#4ade80" strokeWidth={0.7}
-                  />
-                  <text
-                    x={mx} y={my + 0.5}
-                    textAnchor="middle" dominantBaseline="middle"
-                    fontSize={7.5} fontWeight="700" fill="#4ade80"
-                  >
-                    {(weight * 100).toFixed(1)}
-                  </text>
+                  <rect x={mx - 14} y={my - 8} width={28} height={15} rx={5}
+                    fill="rgba(0,0,0,0.55)" stroke="#4ade80" strokeWidth={0.7} />
+                  <text x={mx} y={my + 0.5} textAnchor="middle" dominantBaseline="middle"
+                    fontSize={7.5} fontWeight="700" fill="#4ade80">{(weight * 100).toFixed(1)}</text>
                 </>
               )}
             </g>
@@ -231,48 +249,40 @@ function GraphCanvas({ trees, graph, path, startId, endId }) {
         {trees.map(t => {
           const p = pos[t.treeId];
           if (!p) return null;
-          const isStart = t.treeId === startId;
-          const isEnd   = t.treeId === endId;
-          const inPath  = pathSet.has(t.treeId);
-          const active  = isStart || isEnd || inPath;
+          const isStart  = t.treeId === startId;
+          const isEnd    = t.treeId === endId;
+          const inPath   = pathSet.has(t.treeId);
+          const scanned  = scanNodeSet.has(t.treeId);
+          const active   = isStart || isEnd || inPath;
 
-          const ring = isStart ? '#22d3ee' : isEnd ? '#f472b6' : inPath ? '#4ade80' : 'rgba(255,255,255,0.15)';
-          const fill = isStart ? '#0e7490' : isEnd ? '#9d174d' : inPath ? '#166534' : '#1a2e25';
+          let ring = 'rgba(255,255,255,0.15)', fill = '#1a2e25';
+          if (isStart)       { ring = '#22d3ee'; fill = '#0e7490'; }
+          else if (isEnd)    { ring = '#f472b6'; fill = '#9d174d'; }
+          else if (inPath)   { ring = '#4ade80'; fill = '#166534'; }
+          else if (scanned)  { ring = '#fbbf24'; fill = '#78350f'; }
+
+          const glowing = active || scanned;
+          const nodeDelay = (scanNodeDelay || {})[t.treeId];
+          const nodeAnimStyle = (scanned && !active && nodeDelay != null)
+            ? { animation: `fadeGlowAmber 400ms ease-out ${nodeDelay}ms both` }
+            : {};
 
           return (
-            <g key={t.treeId} style={active ? { filter: `drop-shadow(0 0 6px ${ring})` } : {}}>
-              {/* Subtle outer ring for start/end */}
+            <g key={t.treeId}
+               style={{ ...nodeAnimStyle, ...(glowing ? { filter: `drop-shadow(0 0 6px ${ring})` } : {}) }}>
               {(isStart || isEnd) && (
                 <circle cx={p.x} cy={p.y} r={24} fill="none" stroke={ring} strokeWidth={1} opacity={0.35}>
-                  <animate attributeName="r" values="22;26;22" dur="2s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.35;0.15;0.35" dur="2s" repeatCount="indefinite" />
+                  <animate attributeName="r" values="22;26;22" dur="2.5s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.35;0.12;0.35" dur="2.5s" repeatCount="indefinite" />
                 </circle>
               )}
-
               <circle cx={p.x} cy={p.y} r={17} fill={fill} stroke={ring} strokeWidth={2} />
-
-              {/* Health dot */}
-              <circle
-                cx={p.x + 11} cy={p.y - 11} r={4}
-                fill={healthColor[t.health] || '#888'}
-                stroke="#0f172a" strokeWidth={1.2}
-              />
-
-              {/* ID */}
-              <text
-                x={p.x} y={p.y + 0.5}
-                textAnchor="middle" dominantBaseline="middle"
-                fontSize={7.5} fontWeight="800" fill="white"
-              >
-                {t.treeId}
-              </text>
-
-              {/* Species (only show when zoomed in enough or on active nodes) */}
-              <text
-                x={p.x} y={p.y + 28}
-                textAnchor="middle" fontSize={7}
-                fill={active ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)'}
-              >
+              <circle cx={p.x + 11} cy={p.y - 11} r={4}
+                fill={healthColor[t.health] || '#888'} stroke="#0f172a" strokeWidth={1.2} />
+              <text x={p.x} y={p.y + 0.5} textAnchor="middle" dominantBaseline="middle"
+                fontSize={7.5} fontWeight="800" fill="white">{t.treeId}</text>
+              <text x={p.x} y={p.y + 28} textAnchor="middle" fontSize={7}
+                fill={glowing ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)'}>
                 {t.species.length > 10 ? t.species.slice(0, 9) + '…' : t.species}
               </text>
             </g>
@@ -316,6 +326,11 @@ function GraphCanvas({ trees, graph, path, startId, endId }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+const SCAN_STEP_MS  = 150;  // ms between each scan node appearing
+const PATH_STEP_MS  = 400;  // ms between each path edge appearing
+const SCAN_FADE_MS  = 400;  // CSS fade-in duration for scan nodes
+const PATH_FADE_MS  = 500;  // CSS fade-in duration for path edges
+
 export default function TraversalPage() {
   const [trees,     setTrees]     = useState([]);
   const [startId,   setStartId]   = useState('');
@@ -326,6 +341,16 @@ export default function TraversalPage() {
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState('');
 
+  // Animation: all data set in ONE render, CSS delays handle staggering
+  const [animPhase,         setAnimPhase]         = useState('idle');
+  const [scanNodes,         setScanNodes]         = useState([]);   // full array set at once
+  const [scanEdges,         setScanEdges]         = useState([]);
+  const [scanNodeDelay,     setScanNodeDelay]     = useState({});   // nodeId -> delay ms
+  const [scanEdgeDelay,     setScanEdgeDelay]     = useState({});   // edgeKey -> delay ms
+  const [revealedPathEdges, setRevealedPathEdges] = useState([]);
+  const [pathEdgeDelay,     setPathEdgeDelay]     = useState({});   // edgeKey -> delay ms
+  const phaseTimer = useRef(null);
+
   useEffect(() => {
     axios.get('http://localhost:5000/trees')
       .then(res => {
@@ -335,20 +360,69 @@ export default function TraversalPage() {
       .catch(() => setError('Failed to fetch trees. Is the backend running?'));
   }, []);
 
+  useEffect(() => () => { if (phaseTimer.current) clearTimeout(phaseTimer.current); }, []);
+
   const runDijkstra = () => {
     if (!startId || !endId) { setError('Please select both start and end trees.'); return; }
     if (startId === endId)  { setError('Start and end must be different trees.');   return; }
-    setLoading(true);
-    setError('');
-    setTimeout(() => {
-      const { path: result, totalCost: cost } = dijkstra(graph, startId, endId);
-      if (result.length) { setPath(result); setTotalCost(cost); }
-      else { setError('No path found between these trees.'); setPath([]); setTotalCost(0); }
-      setLoading(false);
-    }, 120);
+    if (phaseTimer.current) clearTimeout(phaseTimer.current);
+    setLoading(true); setError(''); setPath([]); setTotalCost(0);
+
+    const { path: result, totalCost: cost, visitOrder, scannedEdges } = dijkstra(graph, startId, endId);
+    if (!result.length) {
+      setError('No path found between these trees.'); setLoading(false); setAnimPhase('idle');
+      return;
+    }
+
+    // ── Phase 1: Set ALL scan data at once, with CSS delay map ──
+    const nodeDelays = {};
+    visitOrder.forEach((id, i) => { nodeDelays[id] = i * SCAN_STEP_MS; });
+    const edgeDelays = {};
+    scannedEdges.forEach((e, i) => {
+      const k = [e.from, e.to].sort().join('|');
+      if (!(k in edgeDelays)) edgeDelays[k] = i * (SCAN_STEP_MS * 0.6);
+    });
+
+    setScanNodes(visitOrder);
+    setScanEdges(scannedEdges);
+    setScanNodeDelay(nodeDelays);
+    setScanEdgeDelay(edgeDelays);
+    setRevealedPathEdges([]);
+    setPathEdgeDelay({});
+    setAnimPhase('scanning');
+
+    const scanDuration = visitOrder.length * SCAN_STEP_MS + SCAN_FADE_MS + 300;
+
+    // ── Phase 2: After scan finishes, reveal path ──
+    phaseTimer.current = setTimeout(() => {
+      setScanNodes([]); setScanEdges([]);
+      const pathPairs = [];
+      const pDelays = {};
+      for (let i = 0; i < result.length - 1; i++) {
+        const pair = [result[i], result[i + 1]];
+        pathPairs.push(pair);
+        const k = `${pair[0]}|${pair[1]}`;
+        pDelays[k] = i * PATH_STEP_MS;
+      }
+      setRevealedPathEdges(pathPairs);
+      setPathEdgeDelay(pDelays);
+      setAnimPhase('revealing');
+
+      const revealDuration = (result.length - 1) * PATH_STEP_MS + PATH_FADE_MS + 200;
+      phaseTimer.current = setTimeout(() => {
+        setPath(result); setTotalCost(cost);
+        setAnimPhase('done'); setLoading(false);
+      }, revealDuration);
+    }, scanDuration);
   };
 
-  const reset = () => { setPath([]); setStartId(''); setEndId(''); setError(''); setTotalCost(0); };
+  const reset = () => {
+    if (phaseTimer.current) clearTimeout(phaseTimer.current);
+    setPath([]); setStartId(''); setEndId(''); setError(''); setTotalCost(0);
+    setScanNodes([]); setScanEdges([]); setRevealedPathEdges([]);
+    setScanNodeDelay({}); setScanEdgeDelay({}); setPathEdgeDelay({});
+    setAnimPhase('idle'); setLoading(false);
+  };
 
   const edgeCount = (() => {
     const s = new Set();
@@ -414,7 +488,7 @@ export default function TraversalPage() {
                 onClick={runDijkstra} disabled={loading}
                 className="flex-1 flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 text-sm"
               >
-                <Play size={14} /> {loading ? 'Running…' : 'Run Dijkstra'}
+                <Play size={14} /> {animPhase === 'scanning' ? 'Scanning…' : animPhase === 'revealing' ? 'Revealing…' : loading ? 'Running…' : 'Run Dijkstra'}
               </button>
               <button onClick={reset}
                 className="p-2.5 rounded-xl border-2 border-gray-100 hover:border-red-300 text-gray-400 hover:text-red-400 transition-all"
@@ -456,13 +530,27 @@ export default function TraversalPage() {
           <Info size={13} /> Weighted graph · k=3 nearest neighbours · edge weights shown on path
         </div>
         {trees.length > 0
-          ? <GraphCanvas trees={trees} graph={graph} path={path} startId={startId} endId={endId} />
+          ? <GraphCanvas trees={trees} graph={graph} path={path} startId={startId} endId={endId}
+              scanNodes={scanNodes} scanEdges={scanEdges} revealedPathEdges={revealedPathEdges}
+              animPhase={animPhase} scanNodeDelay={scanNodeDelay} scanEdgeDelay={scanEdgeDelay} pathEdgeDelay={pathEdgeDelay} />
           : <div className="h-64 rounded-2xl bg-white/10 flex items-center justify-center text-white/40 text-sm">Loading graph…</div>
         }
       </div>
 
+      {/* Animation status */}
+      {animPhase === 'scanning' && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 p-3 rounded-xl flex items-center gap-3 mb-4 text-sm animate-pulse">
+          <span className="font-medium">🔍 Scanning graph — exploring {scanNodes.length} nodes…</span>
+        </div>
+      )}
+      {animPhase === 'revealing' && (
+        <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-xl flex items-center gap-3 mb-4 text-sm animate-pulse">
+          <span className="font-medium">✨ Revealing optimal path — {revealedPathEdges.length} edges shown…</span>
+        </div>
+      )}
+
       {/* Dijkstra Path result */}
-      {path.length > 0 && (
+      {path.length > 0 && animPhase === 'done' && (
         <div className="bg-white/90 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-white/20">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
