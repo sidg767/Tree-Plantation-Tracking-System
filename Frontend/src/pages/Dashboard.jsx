@@ -21,7 +21,7 @@ export default function Dashboard() {
 
   const fetchTrees = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/trees');
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/trees`);
       setTrees(res.data);
       setError('');
     } catch (err) {
@@ -39,12 +39,12 @@ export default function Dashboard() {
         return;
       }
 
-      await axios.post('http://localhost:5000/addTree', {
+      await axios.post(`${import.meta.env.VITE_API_URL}/addTree`, {
         ...form,
         location: { x, y },
         lastWatered: new Date()
       });
-      
+
       setSuccess('Tree added successfully!');
       setError('');
       setForm({ treeId: '', species: '', x: '', y: '', plantedBy: '', health: '' });
@@ -58,7 +58,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto backdrop-blur-sm pb-20">
-      
+
       {/* Page Title */}
       <div className="mb-10 text-white">
         <h2 className="text-3xl font-bold tracking-tight">Plantation Dashboard</h2>
@@ -66,7 +66,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-8">
-        
+
         {/* Form Section */}
         <section className="bg-white/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-white/20 h-fit">
           <div className="flex items-center gap-2 mb-6">
@@ -80,7 +80,7 @@ export default function Dashboard() {
               <span className="text-sm font-medium">{error}</span>
             </div>
           )}
-          
+
           {success && (
             <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-xl mb-6">
               <CheckCircle2 size={20} />
@@ -92,26 +92,26 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tree ID</label>
-                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all" 
-                  placeholder="T-001" value={form.treeId} onChange={e => setForm({...form, treeId: e.target.value})} />
+                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all"
+                  placeholder="T-001" value={form.treeId} onChange={e => setForm({ ...form, treeId: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-500 uppercase ml-1">Species</label>
-                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all" 
-                  placeholder="Oak" value={form.species} onChange={e => setForm({...form, species: e.target.value})} />
+                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all"
+                  placeholder="Oak" value={form.species} onChange={e => setForm({ ...form, species: e.target.value })} />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-500 uppercase ml-1">X Coord</label>
-                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all" 
-                  placeholder="12.5" value={form.x} onChange={e => setForm({...form, x: e.target.value})} />
+                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all"
+                  placeholder="12.5" value={form.x} onChange={e => setForm({ ...form, x: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-500 uppercase ml-1">Y Coord</label>
-                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all" 
-                  placeholder="45.2" value={form.y} onChange={e => setForm({...form, y: e.target.value})} />
+                <input className="w-full border-2 border-gray-100 p-3 rounded-xl focus:border-green-500 focus:outline-none transition-all"
+                  placeholder="45.2" value={form.y} onChange={e => setForm({ ...form, y: e.target.value })} />
               </div>
             </div>
 
@@ -119,8 +119,8 @@ export default function Dashboard() {
               <label className="text-xs font-bold text-gray-500 uppercase ml-1">Planted By</label>
               <div className="relative">
                 <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input className="w-full border-2 border-gray-100 p-3 pl-10 rounded-xl focus:border-green-500 focus:outline-none transition-all" 
-                  placeholder="John Doe" value={form.plantedBy} onChange={e => setForm({...form, plantedBy: e.target.value})} />
+                <input className="w-full border-2 border-gray-100 p-3 pl-10 rounded-xl focus:border-green-500 focus:outline-none transition-all"
+                  placeholder="John Doe" value={form.plantedBy} onChange={e => setForm({ ...form, plantedBy: e.target.value })} />
               </div>
             </div>
 
@@ -128,8 +128,8 @@ export default function Dashboard() {
               <label className="text-xs font-bold text-gray-500 uppercase ml-1">Health Status</label>
               <div className="relative">
                 <Activity size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <select className="w-full border-2 border-gray-100 p-3 pl-10 rounded-xl focus:border-green-500 focus:outline-none transition-all appearance-none bg-white" 
-                  value={form.health} onChange={e => setForm({...form, health: e.target.value})}>
+                <select className="w-full border-2 border-gray-100 p-3 pl-10 rounded-xl focus:border-green-500 focus:outline-none transition-all appearance-none bg-white"
+                  value={form.health} onChange={e => setForm({ ...form, health: e.target.value })}>
                   <option value="">Select Status</option>
                   <option value="Excellent">Excellent</option>
                   <option value="Good">Good</option>
@@ -154,7 +154,7 @@ export default function Dashboard() {
             </div>
             <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">{trees.length} Total</span>
           </div>
-          
+
           <div className="bg-white/80 backdrop-blur-md rounded-b-2xl shadow-2xl flex-grow overflow-hidden">
             <div className="max-h-[600px] overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-green-600">
               {trees.length === 0 ? (
@@ -170,15 +170,14 @@ export default function Dashboard() {
                         <h3 className="text-lg font-bold text-gray-800 group-hover:text-green-700 transition-colors">{tree.species}</h3>
                         <p className="text-xs font-bold text-gray-400 tracking-wider">ID: {tree.treeId}</p>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                        tree.health === 'Excellent' ? 'bg-green-100 text-green-700' : 
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${tree.health === 'Excellent' ? 'bg-green-100 text-green-700' :
                         tree.health === 'Good' ? 'bg-blue-100 text-blue-700' :
-                        'bg-yellow-100 text-yellow-700'
-                      }`}>
+                          'bg-yellow-100 text-yellow-700'
+                        }`}>
                         {tree.health}
                       </span>
                     </div>
-                    
+
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <MapPin size={14} className="text-green-500" />
@@ -256,9 +255,9 @@ class SegmentTree {
       this.tree[node] = arr[start];
     } else {
       let mid = Math.floor((start + end) / 2);
-      this.build(arr, 2*node+1, start, mid);
-      this.build(arr, 2*node+2, mid+1, end);
-      this.tree[node] = this.tree[2*node+1] + this.tree[2*node+2];
+      this.build(arr, 2 * node + 1, start, mid);
+      this.build(arr, 2 * node + 2, mid + 1, end);
+      this.tree[node] = this.tree[2 * node + 1] + this.tree[2 * node + 2];
     }
   }
 }

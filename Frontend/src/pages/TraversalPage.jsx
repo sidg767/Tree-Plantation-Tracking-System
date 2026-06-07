@@ -97,7 +97,7 @@ function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges,
   // Animation sets
   const scanNodeSet = new Set(scanNodes || []);
   const scanEdgeSet = new Set((scanEdges || []).map(e => [e.from, e.to].sort().join('|')));
-  const revealSet   = new Set((revealedPathEdges || []).map(e => `${e[0]}|${e[1]}`));
+  const revealSet = new Set((revealedPathEdges || []).map(e => `${e[0]}|${e[1]}`));
 
   const healthColor = { Excellent: '#16a34a', Good: '#65a30d', Average: '#ca8a04', Poor: '#dc2626' };
 
@@ -165,7 +165,7 @@ function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges,
   const onMouseUp = () => setDragging(false);
 
   // ── Zoom controls ──
-  const zoomIn  = () => applyZoom(1, vb.x + vb.w / 2, vb.y + vb.h / 2);
+  const zoomIn = () => applyZoom(1, vb.x + vb.w / 2, vb.y + vb.h / 2);
   const zoomOut = () => applyZoom(-1, vb.x + vb.w / 2, vb.y + vb.h / 2);
   const resetView = () => setVb({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H });
 
@@ -205,9 +205,9 @@ function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges,
         {/* ── Edges ── */}
         {edges.map(({ from, to, weight, key }) => {
           const sortedKey = [from, to].sort().join('|');
-          const isPath    = pathEdges.has(`${from}|${to}`);
+          const isPath = pathEdges.has(`${from}|${to}`);
           const isScanned = scanEdgeSet.has(sortedKey);
-          const fwdKey    = `${from}|${to}`, revKey = `${to}|${from}`;
+          const fwdKey = `${from}|${to}`, revKey = `${to}|${from}`;
           const isRevealed = revealSet.has(fwdKey) || revealSet.has(revKey);
           const highlighted = isPath || isRevealed;
           const p1 = pos[from], p2 = pos[to];
@@ -221,12 +221,12 @@ function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges,
           const animStyle = (isScanned && scanDelay != null)
             ? { animation: `fadeGlowAmber 400ms ease-out ${scanDelay}ms both` }
             : (isRevealed && pathDelay != null)
-            ? { animation: `fadeGlowGreen 500ms ease-out ${pathDelay}ms both` }
-            : {};
+              ? { animation: `fadeGlowGreen 500ms ease-out ${pathDelay}ms both` }
+              : {};
 
           let stroke = 'rgba(255,255,255,0.08)', sw = 1, dash = '6 5';
           if (highlighted || isPath) { stroke = '#4ade80'; sw = 2.5; dash = '0'; }
-          else if (isScanned)        { stroke = '#fbbf24'; sw = 1.5; dash = '0'; }
+          else if (isScanned) { stroke = '#fbbf24'; sw = 1.5; dash = '0'; }
 
           return (
             <g key={key} style={animStyle}>
@@ -249,17 +249,17 @@ function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges,
         {trees.map(t => {
           const p = pos[t.treeId];
           if (!p) return null;
-          const isStart  = t.treeId === startId;
-          const isEnd    = t.treeId === endId;
-          const inPath   = pathSet.has(t.treeId);
-          const scanned  = scanNodeSet.has(t.treeId);
-          const active   = isStart || isEnd || inPath;
+          const isStart = t.treeId === startId;
+          const isEnd = t.treeId === endId;
+          const inPath = pathSet.has(t.treeId);
+          const scanned = scanNodeSet.has(t.treeId);
+          const active = isStart || isEnd || inPath;
 
           let ring = 'rgba(255,255,255,0.15)', fill = '#1a2e25';
-          if (isStart)       { ring = '#22d3ee'; fill = '#0e7490'; }
-          else if (isEnd)    { ring = '#f472b6'; fill = '#9d174d'; }
-          else if (inPath)   { ring = '#4ade80'; fill = '#166534'; }
-          else if (scanned)  { ring = '#fbbf24'; fill = '#78350f'; }
+          if (isStart) { ring = '#22d3ee'; fill = '#0e7490'; }
+          else if (isEnd) { ring = '#f472b6'; fill = '#9d174d'; }
+          else if (inPath) { ring = '#4ade80'; fill = '#166534'; }
+          else if (scanned) { ring = '#fbbf24'; fill = '#78350f'; }
 
           const glowing = active || scanned;
           const nodeDelay = (scanNodeDelay || {})[t.treeId];
@@ -269,7 +269,7 @@ function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges,
 
           return (
             <g key={t.treeId}
-               style={{ ...nodeAnimStyle, ...(glowing ? { filter: `drop-shadow(0 0 6px ${ring})` } : {}) }}>
+              style={{ ...nodeAnimStyle, ...(glowing ? { filter: `drop-shadow(0 0 6px ${ring})` } : {}) }}>
               {(isStart || isEnd) && (
                 <circle cx={p.x} cy={p.y} r={24} fill="none" stroke={ring} strokeWidth={1} opacity={0.35}>
                   <animate attributeName="r" values="22;26;22" dur="2.5s" repeatCount="indefinite" />
@@ -326,33 +326,33 @@ function GraphCanvas({ trees, graph, path, startId, endId, scanNodes, scanEdges,
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-const SCAN_STEP_MS  = 150;  // ms between each scan node appearing
-const PATH_STEP_MS  = 400;  // ms between each path edge appearing
-const SCAN_FADE_MS  = 400;  // CSS fade-in duration for scan nodes
-const PATH_FADE_MS  = 500;  // CSS fade-in duration for path edges
+const SCAN_STEP_MS = 150;  // ms between each scan node appearing
+const PATH_STEP_MS = 400;  // ms between each path edge appearing
+const SCAN_FADE_MS = 400;  // CSS fade-in duration for scan nodes
+const PATH_FADE_MS = 500;  // CSS fade-in duration for path edges
 
 export default function TraversalPage() {
-  const [trees,     setTrees]     = useState([]);
-  const [startId,   setStartId]   = useState('');
-  const [endId,     setEndId]     = useState('');
-  const [path,      setPath]      = useState([]);
+  const [trees, setTrees] = useState([]);
+  const [startId, setStartId] = useState('');
+  const [endId, setEndId] = useState('');
+  const [path, setPath] = useState([]);
   const [totalCost, setTotalCost] = useState(0);
-  const [graph,     setGraph]     = useState({});
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState('');
+  const [graph, setGraph] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   // Animation: all data set in ONE render, CSS delays handle staggering
-  const [animPhase,         setAnimPhase]         = useState('idle');
-  const [scanNodes,         setScanNodes]         = useState([]);   // full array set at once
-  const [scanEdges,         setScanEdges]         = useState([]);
-  const [scanNodeDelay,     setScanNodeDelay]     = useState({});   // nodeId -> delay ms
-  const [scanEdgeDelay,     setScanEdgeDelay]     = useState({});   // edgeKey -> delay ms
+  const [animPhase, setAnimPhase] = useState('idle');
+  const [scanNodes, setScanNodes] = useState([]);   // full array set at once
+  const [scanEdges, setScanEdges] = useState([]);
+  const [scanNodeDelay, setScanNodeDelay] = useState({});   // nodeId -> delay ms
+  const [scanEdgeDelay, setScanEdgeDelay] = useState({});   // edgeKey -> delay ms
   const [revealedPathEdges, setRevealedPathEdges] = useState([]);
-  const [pathEdgeDelay,     setPathEdgeDelay]     = useState({});   // edgeKey -> delay ms
+  const [pathEdgeDelay, setPathEdgeDelay] = useState({});   // edgeKey -> delay ms
   const phaseTimer = useRef(null);
 
   useEffect(() => {
-    axios.get('http://localhost:5000/trees')
+    axios.get(`${import.meta.env.VITE_API_URL}/trees`)
       .then(res => {
         setTrees(res.data);
         setGraph(buildWeightedGraph(res.data, 3));
@@ -364,7 +364,7 @@ export default function TraversalPage() {
 
   const runDijkstra = () => {
     if (!startId || !endId) { setError('Please select both start and end trees.'); return; }
-    if (startId === endId)  { setError('Start and end must be different trees.');   return; }
+    if (startId === endId) { setError('Start and end must be different trees.'); return; }
     if (phaseTimer.current) clearTimeout(phaseTimer.current);
     setLoading(true); setError(''); setPath([]); setTotalCost(0);
 
@@ -432,9 +432,9 @@ export default function TraversalPage() {
 
   const healthBadge = {
     Excellent: 'bg-green-100 text-green-700',
-    Good:      'bg-lime-100 text-lime-700',
-    Average:   'bg-yellow-100 text-yellow-700',
-    Poor:      'bg-red-100 text-red-700',
+    Good: 'bg-lime-100 text-lime-700',
+    Average: 'bg-yellow-100 text-yellow-700',
+    Poor: 'bg-red-100 text-red-700',
   };
 
   const edgeWeight = (fromId, toId) => {
@@ -531,8 +531,8 @@ export default function TraversalPage() {
         </div>
         {trees.length > 0
           ? <GraphCanvas trees={trees} graph={graph} path={path} startId={startId} endId={endId}
-              scanNodes={scanNodes} scanEdges={scanEdges} revealedPathEdges={revealedPathEdges}
-              animPhase={animPhase} scanNodeDelay={scanNodeDelay} scanEdgeDelay={scanEdgeDelay} pathEdgeDelay={pathEdgeDelay} />
+            scanNodes={scanNodes} scanEdges={scanEdges} revealedPathEdges={revealedPathEdges}
+            animPhase={animPhase} scanNodeDelay={scanNodeDelay} scanEdgeDelay={scanEdgeDelay} pathEdgeDelay={pathEdgeDelay} />
           : <div className="h-64 rounded-2xl bg-white/10 flex items-center justify-center text-white/40 text-sm">Loading graph…</div>
         }
       </div>
@@ -567,18 +567,17 @@ export default function TraversalPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             {path.map((nodeId, index) => {
-              const tree    = trees.find(t => t.treeId === nodeId);
+              const tree = trees.find(t => t.treeId === nodeId);
               const isStart = index === 0;
-              const isEnd   = index === path.length - 1;
-              const nextId  = path[index + 1];
+              const isEnd = index === path.length - 1;
+              const nextId = path[index + 1];
               const segCost = nextId ? edgeWeight(nodeId, nextId) : null;
               return (
                 <React.Fragment key={nodeId}>
-                  <div className={`flex flex-col items-center rounded-2xl px-4 py-3 shadow text-sm font-semibold ${
-                    isStart ? 'bg-cyan-600 text-white' :
-                    isEnd   ? 'bg-pink-600 text-white' :
-                              'bg-green-50 text-green-800 border border-green-200'
-                  }`}>
+                  <div className={`flex flex-col items-center rounded-2xl px-4 py-3 shadow text-sm font-semibold ${isStart ? 'bg-cyan-600 text-white' :
+                    isEnd ? 'bg-pink-600 text-white' :
+                      'bg-green-50 text-green-800 border border-green-200'
+                    }`}>
                     <span className="text-xs font-bold opacity-70">{nodeId}</span>
                     <span>{tree?.species}</span>
                     <span className={`text-[10px] mt-1 px-2 py-0.5 rounded-full ${healthBadge[tree?.health] || 'bg-gray-100 text-gray-500'}`}>
